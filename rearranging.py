@@ -57,7 +57,7 @@ def compose_canvas(A, B_paths, C, B_posis):
         B = Image.open(B_path)
         canvas.paste(B, (Bx, By))
 
-    canvas.save("output_composed.png")
+    return canvas
 
 def demap(card_map):
     B_paths = []
