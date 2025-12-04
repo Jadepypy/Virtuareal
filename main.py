@@ -6,7 +6,7 @@ Created on Mon Dec  1 22:25:24 2025
 """
 
 from processing import *
-from complete_poc.rearranging import *
+from rearranging import *
 
 CANVAS_W, CANVAS_H = 1920, 1080
 
