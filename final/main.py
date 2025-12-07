@@ -9,6 +9,9 @@ ARUCO_DICT_TYPE = cv2.aruco.DICT_4X4_50
 # IDs for the 4 corners of your whiteboard
 ANCHOR_IDS = [0, 1, 2, 3]
 
+# Set to True to see the camera feed with green detection boxes
+DEBUG_MODE = True
+
 
 # --- 1. LOAD IMAGES (The Lookup Database) ---
 def load_image_resource(filename, width=200):
@@ -35,7 +38,7 @@ def load_image_resource(filename, width=200):
 print("Loading Resources...")
 # Map ArUco ID -> Image Data
 IMAGE_DB = {
-    10: load_image_resource("haruka.jpg", width=250),
+    10: load_image_resource("A.jpg", width=250),
     20: load_image_resource("blur3.png", width=200)
 }
 
@@ -101,8 +104,16 @@ def main():
 
         corners, ids, rejected = detector.detectMarkers(frame)
 
+        # --- DEBUG DRAWING ---
+        if DEBUG_MODE:
+            # Draw green squares around all detected markers
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+
         # 2. ANCHOR (Calibration)
         M = get_homography(corners, ids)
+
+        # DEBUG: Calculate Inverse Homography (Projector -> Camera) to draw on debug frame
+        M_inv = np.linalg.inv(M) if M is not None else None
 
         # Initialize Black Canvas
         projector_canvas = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
@@ -134,6 +145,27 @@ def main():
                     x1 = cx
                     x2 = cx + w
 
+                    # --- DEBUG: Draw the Projected Footprint on the Camera Frame ---
+                    if DEBUG_MODE and M_inv is not None:
+                        # Define the 4 corners of the image in Projector Space
+                        # Top-Left, Top-Right, Btm-Right, Btm-Left
+                        proj_corners = np.array([
+                            [x1, y1],
+                            [x2, y1],
+                            [x2, y2],
+                            [x1, y2]
+                        ], dtype='float32')
+
+                        # Reshape for perspectiveTransform: (1, 4, 2)
+                        proj_corners = proj_corners.reshape(-1, 1, 2)
+
+                        # Transform Projector -> Camera
+                        cam_footprint = cv2.perspectiveTransform(proj_corners, M_inv)
+
+                        # Draw Cyan Box on the raw camera frame
+                        cam_footprint = cam_footprint.astype(int)
+                        cv2.polylines(frame, [cam_footprint], isClosed=True, color=(255, 255, 0), thickness=2)
+
                     # Boundary checks (Don't crash if card goes off screen)
                     # We calculate the "valid slice" that fits on screen
 
@@ -161,8 +193,9 @@ def main():
 
         # Show Results
         cv2.imshow("Projector Output", projector_canvas)
-        # Optional: Show camera feed for debugging
-        # cv2.imshow("Debug Input", frame)
+
+        if DEBUG_MODE:
+            cv2.imshow("Debug Input", frame)
 
         if cv2.waitKey(1) == ord('q'): break
 
