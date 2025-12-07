@@ -11,6 +11,7 @@ ANCHOR_IDS = [0, 1, 2, 3]
 
 # Set to True to see the camera feed with green detection boxes
 DEBUG_MODE = True
+WINDOW_NAME = "Projector Output"
 
 
 # --- 1. LOAD IMAGES (The Lookup Database) ---
@@ -94,6 +95,17 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
     detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(ARUCO_DICT_TYPE))
+
+    # --- FULLSCREEN WINDOW SETUP ---
+    # Create the window before the loop starts
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    # Force it to be fullscreen (removes title bar)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+    # Show a black screen immediately so we know it's working
+    initial_black = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
+    cv2.imshow(WINDOW_NAME, initial_black)
+    cv2.waitKey(1)
 
     print("System Started. Press 'q' to exit.")
 
@@ -192,7 +204,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
 
         # Show Results
-        cv2.imshow("Projector Output", projector_canvas)
+        cv2.imshow(WINDOW_NAME, projector_canvas)
 
         if DEBUG_MODE:
             cv2.imshow("Debug Input", frame)
