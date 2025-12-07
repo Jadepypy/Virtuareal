@@ -130,18 +130,27 @@ def main():
         # Initialize Black Canvas
         projector_canvas = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
 
-        # --- DRAW ALIGNMENT TARGETS ---
+        # --- DRAW ALIGNMENT TARGETS (SUBTLE) ---
         if M is not None:
-            # Draw Red Circles at the 4 corners of the projection
-            # Use these to physically move your whiteboard markers until they matches the red dots
-            r = 20
-            c = (0, 0, 255)  # Red
-            cv2.circle(projector_canvas, (0, 0), r, c, -1)
-            cv2.circle(projector_canvas, (CANVAS_W, 0), r, c, -1)
-            cv2.circle(projector_canvas, (CANVAS_W, CANVAS_H), r, c, -1)
-            cv2.circle(projector_canvas, (0, CANVAS_H), r, c, -1)
-            # Draw border to confirm full canvas visibility
-            cv2.rectangle(projector_canvas, (0, 0), (CANVAS_W, CANVAS_H), c, 5)
+            # Draw minimalist white crosshairs at the corners
+            c_color = (200, 200, 200)  # Light Grey
+            L = 30  # Length of crosshair arm
+            t = 2  # Thickness
+
+            def draw_cross(img, x, y):
+                # Clamp drawing to within image bounds to prevent errors
+                x_min, x_max = max(0, x - L), min(CANVAS_W, x + L)
+                y_min, y_max = max(0, y - L), min(CANVAS_H, y + L)
+                if x_max > x_min: cv2.line(img, (x_min, y), (x_max, y), c_color, t)
+                if y_max > y_min: cv2.line(img, (x, y_min), (x, y_max), c_color, t)
+
+            draw_cross(projector_canvas, 0, 0)
+            draw_cross(projector_canvas, CANVAS_W, 0)
+            draw_cross(projector_canvas, CANVAS_W, CANVAS_H)
+            draw_cross(projector_canvas, 0, CANVAS_H)
+
+            # Draw very subtle dark grey border to confirm bounds
+            cv2.rectangle(projector_canvas, (0, 0), (CANVAS_W, CANVAS_H), (40, 40, 40), 1)
 
         # 3. LOCATE CARDS & 4. LOOK UP IMAGES
         if ids is not None and M is not None:
@@ -187,9 +196,9 @@ def main():
                         # Transform Projector -> Camera
                         cam_footprint = cv2.perspectiveTransform(proj_corners, M_inv)
 
-                        # Draw Cyan Box on the raw camera frame
+                        # Draw subtle white outline on camera frame
                         cam_footprint = cam_footprint.astype(int)
-                        cv2.polylines(frame, [cam_footprint], isClosed=True, color=(255, 255, 0), thickness=2)
+                        cv2.polylines(frame, [cam_footprint], isClosed=True, color=(200, 200, 200), thickness=1)
 
                     # Boundary checks (Don't crash if card goes off screen)
                     # We calculate the "valid slice" that fits on screen
@@ -211,10 +220,10 @@ def main():
                     if c_x2 > c_x1 and c_y2 > c_y1:
                         projector_canvas[c_y1:c_y2, c_x1:c_x2] = img_to_draw[i_y1:i_y2, i_x1:i_x2]
 
-        # Draw Calibration Status (Visual Aid)
+        # Draw Calibration Status (Subtle)
         if M is None:
-            cv2.putText(projector_canvas, "CALIBRATING... FINDING 4 CORNERS", (100, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
+            cv2.putText(projector_canvas, "Calibrating...", (50, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
 
         # Show Results
         cv2.imshow(WINDOW_NAME, projector_canvas)
