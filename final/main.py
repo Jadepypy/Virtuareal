@@ -130,6 +130,19 @@ def main():
         # Initialize Black Canvas
         projector_canvas = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
 
+        # --- DRAW ALIGNMENT TARGETS ---
+        if M is not None:
+            # Draw Red Circles at the 4 corners of the projection
+            # Use these to physically move your whiteboard markers until they matches the red dots
+            r = 20
+            c = (0, 0, 255)  # Red
+            cv2.circle(projector_canvas, (0, 0), r, c, -1)
+            cv2.circle(projector_canvas, (CANVAS_W, 0), r, c, -1)
+            cv2.circle(projector_canvas, (CANVAS_W, CANVAS_H), r, c, -1)
+            cv2.circle(projector_canvas, (0, CANVAS_H), r, c, -1)
+            # Draw border to confirm full canvas visibility
+            cv2.rectangle(projector_canvas, (0, 0), (CANVAS_W, CANVAS_H), c, 5)
+
         # 3. LOCATE CARDS & 4. LOOK UP IMAGES
         if ids is not None and M is not None:
             for i, marker_id in enumerate(ids.flatten()):
