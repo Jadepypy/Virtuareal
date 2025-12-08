@@ -221,15 +221,33 @@ class BaseCard:
             vx = center_x - (payload_card.width // 2)
             vy = y + VIRTUAL_CARD_OFFSET_Y
 
-            # Register with the System (Assigns ID, Stores Pos)
-            CardSystem.register(payload_card, pos=(vx, vy), is_virtual=True)
+            target_card = payload_card
+
+            # Handle Frame Consistency: reuse existing output if available
+            # This allows run_logic to be "stateless" (create new objects)
+            # while the system maintains continuity.
+            if self.output_generated is not None:
+                target_card = self.output_generated
+                # Update content if applicable
+                if hasattr(target_card, 'img_arr') and hasattr(payload_card, 'img_arr'):
+                    target_card.img_arr = payload_card.img_arr
+                elif hasattr(target_card, 'kernel_arr') and hasattr(payload_card, 'kernel_arr'):
+                    target_card.kernel_arr = payload_card.kernel_arr
+            else:
+                self.output_generated = target_card
+                # Register with the System (Assigns ID, Stores Pos)
+                CardSystem.register(target_card, pos=(vx, vy), is_virtual=True)
+
+            # Always Ensure position is up to date in System
+            if target_card in CardSystem._store:
+                CardSystem._store[target_card]['pos'] = (vx, vy)
 
             # Add visual line for output
             start = (center_x, bottom_y)
             end = (center_x, vy)
             self.conn_lines.append((start, end, True))
 
-            return payload_card
+            return target_card
         return None
 
     def draw_connections(self):
@@ -260,7 +278,7 @@ class BaseCard:
         """
         User Script. Pure behavior.
         """
-        return None
+        pass
 
 
 class ImageCard(BaseCard):
@@ -275,7 +293,6 @@ class ImageCard(BaseCard):
         # Render: Self
         if self.img_arr is not None:
             self.render_img(self.img_arr)
-        return None
 
 
 class KernelCard(BaseCard):
@@ -288,13 +305,12 @@ class KernelCard(BaseCard):
 
     def run_logic(self):
         # 1. RENDER SELF (Visual Matrix)
-        # (Rendering code omitted for brevity - same as before but inside helper)
         self._render_matrix_visual()
 
         # 2. LOGIC
         source = self.resolved_inputs.get(LEFT)
         if not source or source.img_arr is None:
-            return None
+            return
 
         # Process
         result_arr = source.img_arr
@@ -304,7 +320,7 @@ class KernelCard(BaseCard):
         # Result Creation (Clean - No IDs/Pos)
         result_card = ImageCard(result_arr)
 
-        return self.project_output(DOWN, result_card)
+        self.project_output(DOWN, result_card)
 
     def _render_matrix_visual(self):
         viz_w, viz_h = self.width, self.height
@@ -359,15 +375,15 @@ class KernelAdditionCard(BaseCard):
         k_right = self.resolved_inputs.get(RIGHT)
 
         if not (k_left and k_right):
-            return None
+            return
 
         try:
             sum_arr = k_left.kernel_arr + k_right.kernel_arr
             # Clean Creation
             result_card = KernelCard(sum_arr)
-            return self.project_output(DOWN, result_card)
+            self.project_output(DOWN, result_card)
         except Exception:
-            return None
+            return
 
     def _render_plus_visual(self):
         viz = np.ones((self.height, self.width, 3), dtype=np.uint8) * 240
@@ -545,11 +561,11 @@ def main():
 
             new_virtuals = []
             for card in active_cards:
+                # We check the internal state to see if output was created
                 if card.output_generated is None:
-                    out = card.run_logic()
-                    if out:
-                        new_virtuals.append(out)
-                        card.output_generated = out
+                    card.run_logic()
+                    if card.output_generated:
+                        new_virtuals.append(card.output_generated)
                 else:
                     card.run_logic()
 
