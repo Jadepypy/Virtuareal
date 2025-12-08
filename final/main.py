@@ -494,36 +494,35 @@ CLASS_NAME_MAP = {
 
 def create_physical_card_instance(marker_id):
     """
-    Creates the logic instance using the JSON_CARD_LIBRARY look-up.
+    Creates the logic instance using the JSON_CARD_LIBRARY look-up with init_script.
+    Expects the script to assign the instance to a variable named 'card'.
     """
     key = str(marker_id)
     if key not in JSON_CARD_LIBRARY:
         return None
 
     config = JSON_CARD_LIBRARY[key]
-    class_name = config.get("class")
-    args_list = config.get("args", [])
-    script_str = config.get("script", "")
+    init_script = config.get("init_script", "")
 
-    cls_type = CLASS_NAME_MAP.get(class_name)
-    if not cls_type:
+    if not init_script:
         return None
 
-    # Resolve args from Global Scope (Strings -> Objects)
-    resolved_args = []
-    for arg in args_list:
-        if isinstance(arg, str) and arg in globals():
-            resolved_args.append(globals()[arg])
-        else:
-            resolved_args.append(arg)
+    # Prepare local scope with necessary classes and libraries
+    local_scope = {
+        "cv2": cv2,
+        "np": np,
+        "Image": Image,  # PIL Image
+        "ImageCard": ImageCard,
+        "KernelCard": KernelCard,
+        "KernelAdditionCard": KernelAdditionCard
+        # Default imports are available via __builtins__
+    }
 
-    # Instantiate
     try:
-        instance = cls_type(*resolved_args)
-        # Explicitly load the script from JSON (Overrides default/universal)
-        if script_str:
-            instance.load_script(script_str)
-        return instance
+        # Execute the initialization script
+        # The script MUST assign the result to 'card'
+        exec(init_script, globals(), local_scope)
+        return local_scope.get("card")
     except Exception as e:
         print(f"Error instantiating card {marker_id}: {e}")
         return None
