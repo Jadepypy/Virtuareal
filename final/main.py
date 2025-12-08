@@ -147,6 +147,12 @@ class BaseCard:
             cv2.line(canvas, self.conn_output_start, self.conn_output_end, LINE_COLOR, THICKNESS)
             cv2.circle(canvas, self.conn_output_end, RADIUS, LINE_COLOR, -1)
 
+    def render(self, canvas):
+        """
+        Draws the card's visual content. Overridden by subclasses.
+        """
+        pass
+
     def reset_logic_state(self):
         self.output_generated = None
         self.conn_input_start = None
@@ -165,6 +171,10 @@ class ImageCard(BaseCard):
         super().__init__(id, pos, width=w, height=h, is_virtual=is_virtual)
         self.img_arr = image_data
         self.type = "source"  # Keep type tag for debug compatibility
+
+    def render(self, canvas):
+        # Draw the image data
+        project_image_at(canvas, self.img_arr, self.top_left)
 
 
 class KernelCard(BaseCard):
@@ -208,6 +218,10 @@ class KernelCard(BaseCard):
                 return final_card
 
         return None
+
+    def render(self, canvas):
+        # Draw the kernel icon/representation
+        project_image_at(canvas, self.img_representation, self.top_left)
 
 
 # --- 3. FACTORY & HELPERS ---
@@ -364,11 +378,8 @@ def main():
 
         # --- RENDER ---
         for card in active_cards:
-            # 1. Draw Content
-            if isinstance(card, ImageCard):
-                project_image_at(projector_canvas, card.img_arr, card.top_left)
-            elif isinstance(card, KernelCard):
-                project_image_at(projector_canvas, card.img_representation, card.top_left)
+            # 1. Draw Content (Polymorphic)
+            card.render(projector_canvas)
 
             # 2. Draw Connections
             card.draw_connections(projector_canvas)
