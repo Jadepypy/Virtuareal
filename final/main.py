@@ -11,7 +11,7 @@ WINDOW_NAME = "Projector Output"
 
 # Logic Config
 VIRTUAL_CARD_OFFSET_Y = 220
-PROBE_DISTANCE = 250
+PROBE_DISTANCE = 100
 MAX_CHAIN_DEPTH = 5
 CARD_TTL = 15
 
@@ -88,7 +88,7 @@ class BaseCard:
             probe_point = (0, 0)
             vis_start = (0, 0)
 
-            # 1. Determine Probe Geometry
+            # 1. Determine Probe Geometry (Fixed Length)
             if direction == LEFT:
                 probe_point = (x - PROBE_DISTANCE, center_y)
                 vis_start = (x, center_y)
@@ -98,23 +98,14 @@ class BaseCard:
 
             # 2. Hit Test
             found_card = None
-            vis_end = probe_point  # Default to probe tip if nothing found
+            # Visuals strictly follow geometry, no snapping to neighbor center
+            vis_end = probe_point
 
             for candidate in active_cards:
                 if candidate is not self and isinstance(candidate, target_class):
                     if candidate.is_point_inside(probe_point):
                         found_card = candidate
-
-                        # Snap visual
-                        if direction == LEFT:
-                            src_right_x = candidate.top_left[0] + candidate.width
-                            src_center_y = candidate.top_left[1] + (candidate.height // 2)
-                            vis_end = (src_right_x, src_center_y)
-                        elif direction == RIGHT:
-                            src_left_x = candidate.top_left[0]
-                            src_center_y = candidate.top_left[1] + (candidate.height // 2)
-                            vis_end = (src_left_x, src_center_y)
-                        break
+                        break  # Found a match, stop looking
 
             # 3. Store Result
             if found_card:
@@ -155,9 +146,9 @@ class BaseCard:
 
             payload_object.top_left = (vx, vy)
 
-            # Add visual line for output
+            # Add visual line for output (Vertical)
             start = (center_x, bottom_y)
-            end = (center_x + (vx - center_x) + (res_w // 2), vy)
+            end = (center_x, vy)  # Straight down to the top of the new card
             self.conn_lines.append((start, end, True))
 
             return payload_object
@@ -361,6 +352,8 @@ def create_physical_card(marker_id, pos):
         return KernelCard(22, pos, kernel_arr=horizonal_grad_kernel, is_virtual=False)
     elif marker_id == 23:
         return KernelAdditionCard(23, pos, is_virtual=False)
+    elif marker_id == 30:
+        return KernelAdditionCard(30, pos, is_virtual=False)
     return None
 
 
