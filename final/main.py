@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from PIL import Image
+import types
 
 # --- CONFIGURATION ---
 CANVAS_W, CANVAS_H = 1920, 1080
@@ -38,8 +39,107 @@ def load_image_resource(filename, width=200):
 
 SOURCE_IMG = load_image_resource("A.jpg", width=250)
 
+# --- 2. LOGIC SCRIPTS (Universal Library) ---
+# These are pure logic bodies. They will be wrapped in 'def run_logic(self):' at runtime.
 
-# --- 2. CARD DATABASE (Server) ---
+IMAGE_SCRIPT = """
+# Image Logic: Just Render
+if self.img_arr is not None:
+    self.render_img(self.img_arr)
+"""
+
+KERNEL_SCRIPT = """
+# --- Helper Definition ---
+def render_matrix_visual():
+    viz_w, viz_h = self.width, self.height
+    k_viz = np.ones((viz_h, viz_w, 3), dtype=np.uint8) * 255
+    rows, cols = self.kernel_arr.shape
+    color = (0, 0, 0)
+    step_x = viz_w / cols
+    step_y = viz_h / rows
+
+    for i in range(cols + 1):
+        x = int(i * step_x)
+        cv2.line(k_viz, (x, 0), (x, viz_h), color, 2)
+    for i in range(rows + 1):
+        y = int(i * step_y)
+        cv2.line(k_viz, (0, y), (viz_w, y), color, 2)
+
+    if rows <= 5 and cols <= 5:
+        for r in range(rows):
+            for c in range(cols):
+                val = self.kernel_arr[r, c]
+                text = f"{val:.2f}"
+                if abs(val - 1 / 9) < 0.001: text = "1/9"
+                elif abs(val - 1.0) < 0.001: text = "1"
+                elif abs(val) < 0.001: text = "0"
+
+                center_x = int(c * step_x + step_x / 2)
+                center_y = int(r * step_y + step_y / 2)
+                (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                cv2.putText(k_viz, text, (center_x - text_w // 2, center_y + text_h // 2), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
+    cv2.rectangle(k_viz, (0, 0), (viz_w - 1, viz_h - 1), (0, 0, 0), 4)
+    self.render_img(k_viz)
+
+# --- Execution ---
+# 1. RENDER
+render_matrix_visual()
+
+# 2. LOGIC
+source = self.resolved_inputs.get(LEFT)
+if not source or source.img_arr is None:
+    return
+
+# Process
+result_arr = source.img_arr
+for _ in range(10): 
+    result_arr = cv2.filter2D(result_arr, -1, self.kernel_arr)
+
+# Result Creation
+# Note: ImageCard will automatically load IMAGE_SCRIPT upon init
+result_card = ImageCard(result_arr)
+
+self.project_output(DOWN, result_card)
+"""
+
+ADDITION_SCRIPT = """
+# --- Helper Definition ---
+def render_plus_visual():
+    viz = np.ones((self.height, self.width, 3), dtype=np.uint8) * 240
+    cv2.rectangle(viz, (0,0), (self.width-1, self.height-1), (0,0,0), 4)
+    center_x, center_y = self.width//2, self.height//2
+    line_len = 40
+    cv2.line(viz, (center_x - line_len, center_y), (center_x + line_len, center_y), (0,0,0), 5)
+    cv2.line(viz, (center_x, center_y - line_len), (center_x, center_y + line_len), (0,0,0), 5)
+    self.render_img(viz)
+
+# --- Execution ---
+# 1. RENDER
+render_plus_visual()
+
+# 2. LOGIC
+k_left = self.resolved_inputs.get(LEFT)
+k_right = self.resolved_inputs.get(RIGHT)
+
+if not (k_left and k_right):
+    return
+
+try:
+    sum_arr = k_left.kernel_arr + k_right.kernel_arr
+
+    # Clean Creation of Virtual Kernel
+    # Note: KernelCard will automatically load KERNEL_SCRIPT upon init
+    result_card = KernelCard(sum_arr)
+
+    self.project_output(DOWN, result_card)
+except Exception:
+    return
+"""
+
+
+# --- 3. CARD DATABASE (Server) ---
 
 class CardSystem:
     """
@@ -110,15 +210,13 @@ class CardSystem:
     def reset_frame(cls, canvas):
         cls.canvas = canvas
         cls._virtual_id_counter = 0
-        # Optional: We could garbage collect old virtuals here if we tracked them explicitly
 
 
-# --- 3. CLASS LIBRARY (Refactored) ---
+# --- 4. CLASS LIBRARY (Refactored) ---
 
 class BaseCard:
     """
     Base class with declarative inputs/outputs and dependency resolution logic.
-    State is delegated to CardSystem.
     """
 
     def __init__(self, width, height, inputs=None, outputs=None):
@@ -134,8 +232,38 @@ class BaseCard:
         self.output_generated = None
         self.conn_lines = []
 
-        # --- Properties delegating to Database ---
+        # Auto-load Universal Script for this class type
+        self.load_universal_script()
 
+    def load_universal_script(self):
+        """
+        Looks up the script associated with the class type and loads it.
+        """
+        script = CLASS_SCRIPTS.get(type(self))
+        if script:
+            self.load_script(script)
+
+    def load_script(self, code_str):
+        """
+        Dynamically compiles and attaches a logic script as 'run_logic'.
+        Wraps the raw code string in a method definition.
+        """
+        if not code_str: return
+
+        # Wrap the raw script content into a function definition
+        indented_code = "\n".join(["    " + line for line in code_str.split("\n")])
+        wrapped_code = f"def run_logic(self):\n{indented_code}"
+
+        # Execute code in a local scope to get the function object
+        # We pass globals() so scripts can access cv2, np, ImageCard, etc.
+        local_scope = {}
+        exec(wrapped_code, globals(), local_scope)
+
+        # Attach the function to this instance
+        if "run_logic" in local_scope:
+            setattr(self, "run_logic", types.MethodType(local_scope["run_logic"], self))
+
+    # --- Properties delegating to Database ---
     @property
     def top_left(self):
         return CardSystem.get_pos(self)
@@ -224,8 +352,6 @@ class BaseCard:
             target_card = payload_card
 
             # Handle Frame Consistency: reuse existing output if available
-            # This allows run_logic to be "stateless" (create new objects)
-            # while the system maintains continuity.
             if self.output_generated is not None:
                 target_card = self.output_generated
                 # Update content if applicable
@@ -235,7 +361,7 @@ class BaseCard:
                     target_card.kernel_arr = payload_card.kernel_arr
             else:
                 self.output_generated = target_card
-                # Register with the System (Assigns ID, Stores Pos)
+                # Register with the System
                 CardSystem.register(target_card, pos=(vx, vy), is_virtual=True)
 
             # Always Ensure position is up to date in System
@@ -276,7 +402,8 @@ class BaseCard:
 
     def run_logic(self):
         """
-        User Script. Pure behavior.
+        User Script. Default implementation does nothing.
+        Usually overridden by load_script().
         """
         pass
 
@@ -288,12 +415,6 @@ class ImageCard(BaseCard):
         self.img_arr = image_data
         self.type = "source"
 
-    def run_logic(self):
-        # Logic: None
-        # Render: Self
-        if self.img_arr is not None:
-            self.render_img(self.img_arr)
-
 
 class KernelCard(BaseCard):
     def __init__(self, kernel_arr):
@@ -303,61 +424,6 @@ class KernelCard(BaseCard):
         self.type = "kernel"
         self.kernel_arr = kernel_arr
 
-    def run_logic(self):
-        # 1. RENDER SELF (Visual Matrix)
-        self._render_matrix_visual()
-
-        # 2. LOGIC
-        source = self.resolved_inputs.get(LEFT)
-        if not source or source.img_arr is None:
-            return
-
-        # Process
-        result_arr = source.img_arr
-        for _ in range(10):
-            result_arr = cv2.filter2D(result_arr, -1, self.kernel_arr)
-
-        # Result Creation (Clean - No IDs/Pos)
-        result_card = ImageCard(result_arr)
-
-        self.project_output(DOWN, result_card)
-
-    def _render_matrix_visual(self):
-        viz_w, viz_h = self.width, self.height
-        k_viz = np.ones((viz_h, viz_w, 3), dtype=np.uint8) * 255
-        rows, cols = self.kernel_arr.shape
-        color = (0, 0, 0)
-        step_x = viz_w / cols
-        step_y = viz_h / rows
-
-        for i in range(cols + 1):
-            x = int(i * step_x)
-            cv2.line(k_viz, (x, 0), (x, viz_h), color, 2)
-        for i in range(rows + 1):
-            y = int(i * step_y)
-            cv2.line(k_viz, (0, y), (viz_w, y), color, 2)
-
-        if rows <= 5 and cols <= 5:
-            for r in range(rows):
-                for c in range(cols):
-                    val = self.kernel_arr[r, c]
-                    text = f"{val:.2f}"
-                    if abs(val - 1 / 9) < 0.001:
-                        text = "1/9"
-                    elif abs(val - 1.0) < 0.001:
-                        text = "1"
-                    elif abs(val) < 0.001:
-                        text = "0"
-
-                    center_x = int(c * step_x + step_x / 2)
-                    center_y = int(r * step_y + step_y / 2)
-                    (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                    cv2.putText(k_viz, text, (center_x - text_w // 2, center_y + text_h // 2),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-
-        cv2.rectangle(k_viz, (0, 0), (viz_w - 1, viz_h - 1), (0, 0, 0), 4)
-        self.render_img(k_viz)
-
 
 class KernelAdditionCard(BaseCard):
     def __init__(self):
@@ -366,43 +432,23 @@ class KernelAdditionCard(BaseCard):
                          outputs=[(DOWN, KernelCard)])
         self.type = "operation"
 
-    def run_logic(self):
-        # 1. RENDER SELF
-        self._render_plus_visual()
 
-        # 2. LOGIC
-        k_left = self.resolved_inputs.get(LEFT)
-        k_right = self.resolved_inputs.get(RIGHT)
-
-        if not (k_left and k_right):
-            return
-
-        try:
-            sum_arr = k_left.kernel_arr + k_right.kernel_arr
-            # Clean Creation
-            result_card = KernelCard(sum_arr)
-            self.project_output(DOWN, result_card)
-        except Exception:
-            return
-
-    def _render_plus_visual(self):
-        viz = np.ones((self.height, self.width, 3), dtype=np.uint8) * 240
-        cv2.rectangle(viz, (0, 0), (self.width - 1, self.height - 1), (0, 0, 0), 4)
-        center_x, center_y = self.width // 2, self.height // 2
-        line_len = 40
-        cv2.line(viz, (center_x - line_len, center_y), (center_x + line_len, center_y), (0, 0, 0), 5)
-        cv2.line(viz, (center_x, center_y - line_len), (center_x, center_y + line_len), (0, 0, 0), 5)
-        self.render_img(viz)
-
-
-# --- 4. FACTORY & HELPERS ---
+# --- 5. FACTORY & HELPERS ---
 
 # 1. Define Kernels
 K_BLUR_3 = np.ones((3, 3), np.float32) / 9.0
 K_SOBEL_Y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
 K_SOBEL_X = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
 
-# 2. Card Definitions (JSON-like Library)
+# 2. Universal Script Registry
+# Maps Python Classes to their Logic Script Strings
+CLASS_SCRIPTS = {
+    ImageCard: IMAGE_SCRIPT,
+    KernelCard: KERNEL_SCRIPT,
+    KernelAdditionCard: ADDITION_SCRIPT
+}
+
+# 3. Card Configuration Library
 CARD_LIBRARY = {
     10: {"class": ImageCard, "args": [SOURCE_IMG]},
     20: {"class": KernelCard, "args": [K_BLUR_3]},
@@ -419,6 +465,7 @@ def create_physical_card_instance(marker_id):
     """
     config = CARD_LIBRARY.get(marker_id)
     if config:
+        # Script loading is now handled automatically in BaseCard.__init__
         return config["class"](*config["args"])
     return None
 
@@ -458,7 +505,7 @@ def transform_point(point, M):
     return int(t[0][0][0]), int(t[0][0][1])
 
 
-# --- 5. MAIN LOOP ---
+# --- 6. MAIN LOOP ---
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -560,7 +607,6 @@ def main():
 
             new_virtuals = []
             for card in active_cards:
-                # We check the internal state to see if output was created
                 if card.output_generated is None:
                     card.run_logic()
                     if card.output_generated:
