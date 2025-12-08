@@ -39,33 +39,120 @@ def load_image_resource(filename, width=200):
 SOURCE_IMG = load_image_resource("A.jpg", width=250)
 
 
-# --- 2. CLASS LIBRARY (Refactored) ---
+# --- 2. CARD DATABASE (Server) ---
+
+class CardSystem:
+    """
+    Acts as the database/server managing the state (ID, Position, TTL)
+    for all card instances. Decouples state from behavior.
+    """
+    _store = {}  # instance -> {id, pos, is_virtual, ttl}
+    _virtual_id_counter = 0
+    canvas = None  # Current frame canvas context
+
+    @classmethod
+    def register(cls, card, id=None, pos=(0, 0), is_virtual=False):
+        # Auto-generate ID for virtuals if not provided
+        if id is None and is_virtual:
+            cls._virtual_id_counter += 1
+            id = f"v-{cls._virtual_id_counter}"
+
+        cls._store[card] = {
+            'id': id,
+            'pos': pos,
+            'is_virtual': is_virtual,
+            'ttl': CARD_TTL
+        }
+        return id
+
+    @classmethod
+    def update_physical(cls, card, pos):
+        if card in cls._store:
+            entry = cls._store[card]
+
+            # Smoothing Logic: Low-pass filter to reduce jitter
+            old_x, old_y = entry['pos']
+            target_x, target_y = pos
+
+            smooth_x = int(old_x * 0.8 + target_x * 0.2)
+            smooth_y = int(old_y * 0.8 + target_y * 0.2)
+
+            entry['pos'] = (smooth_x, smooth_y)
+            entry['ttl'] = CARD_TTL  # Reset TTL on active tracking
+
+    @classmethod
+    def get_pos(cls, card):
+        return cls._store[card]['pos'] if card in cls._store else (0, 0)
+
+    @classmethod
+    def get_id(cls, card):
+        return cls._store[card]['id'] if card in cls._store else "?"
+
+    @classmethod
+    def is_virtual(cls, card):
+        return cls._store[card]['is_virtual'] if card in cls._store else False
+
+    @classmethod
+    def get_ttl(cls, card):
+        return cls._store[card]['ttl'] if card in cls._store else 0
+
+    @classmethod
+    def decrease_ttl(cls, card):
+        if card in cls._store:
+            cls._store[card]['ttl'] -= 1
+
+    @classmethod
+    def unregister(cls, card):
+        if card in cls._store:
+            del cls._store[card]
+
+    @classmethod
+    def reset_frame(cls, canvas):
+        cls.canvas = canvas
+        cls._virtual_id_counter = 0
+        # Optional: We could garbage collect old virtuals here if we tracked them explicitly
+
+
+# --- 3. CLASS LIBRARY (Refactored) ---
 
 class BaseCard:
     """
     Base class with declarative inputs/outputs and dependency resolution logic.
+    State is delegated to CardSystem.
     """
 
-    def __init__(self, id, pos, width, height, inputs=None, outputs=None, is_virtual=False):
-        self.id = id
-        self.top_left = pos  # (x, y)
+    def __init__(self, width, height, inputs=None, outputs=None):
         self.width = width
         self.height = height
-        self.is_virtual = is_virtual
-        self.ttl = CARD_TTL
 
         # DECLARATIVE SPECS
-        # list of tuples: [(Direction, ClassType)]
         self.inputs_spec = inputs or []
-        # list of tuples: [(Direction, ClassType)]
         self.outputs_spec = outputs or []
 
-        # RUNTIME STATE
+        # RUNTIME STATE (Logic only)
         self.resolved_inputs = {}  # { Direction: CardObject }
         self.output_generated = None
+        self.conn_lines = []
 
-        # Connection Visualization State
-        self.conn_lines = []  # list of (start_pt, end_pt, is_connected) for drawing
+        # --- Properties delegating to Database ---
+
+    @property
+    def top_left(self):
+        return CardSystem.get_pos(self)
+
+    @property
+    def id(self):
+        return CardSystem.get_id(self)
+
+    @property
+    def is_virtual(self):
+        return CardSystem.is_virtual(self)
+
+    @property
+    def ttl(self):
+        return CardSystem.get_ttl(self)
+
+    # --- Geometry & Resolution ---
 
     def is_point_inside(self, point):
         px, py = point
@@ -75,9 +162,6 @@ class BaseCard:
         return (x1 < px < x2) and (y1 < py < y2)
 
     def resolve_dependencies(self, active_cards):
-        """
-        Scans neighbors based on inputs_spec and populates resolved_inputs.
-        """
         self.resolved_inputs = {}
         self.conn_lines = []
 
@@ -88,7 +172,7 @@ class BaseCard:
             probe_point = (0, 0)
             vis_start = (0, 0)
 
-            # 1. Determine Probe Geometry (Fixed Length)
+            # 1. Determine Probe Geometry
             if direction == LEFT:
                 probe_point = (x - PROBE_DISTANCE, center_y)
                 vis_start = (x, center_y)
@@ -98,16 +182,15 @@ class BaseCard:
 
             # 2. Hit Test
             found_card = None
-            # Visuals strictly follow geometry, no snapping to neighbor center
             vis_end = probe_point
 
             for candidate in active_cards:
                 if candidate is not self and isinstance(candidate, target_class):
                     if candidate.is_point_inside(probe_point):
                         found_card = candidate
-                        break  # Found a match, stop looking
+                        break
 
-            # 3. Store Result
+                        # 3. Store Result
             if found_card:
                 self.resolved_inputs[direction] = found_card
 
@@ -115,129 +198,115 @@ class BaseCard:
             self.conn_lines.append((vis_start, vis_end, found_card is not None))
 
     def get_priority(self):
-        """
-        Calculates topological depth.
-        0 = Leaf / No Dependencies met
-        N = 1 + Max Depth of inputs
-        """
         if not self.resolved_inputs:
             return 0
 
-        # Priority is 1 + highest priority of any connected input
         max_input_prio = 0
         for direction, card in self.resolved_inputs.items():
             max_input_prio = max(max_input_prio, card.get_priority())
 
         return 1 + max_input_prio
 
-    def project_output(self, direction, payload_object):
+    def project_output(self, direction, payload_card):
         """
-        Helper to position the output virtual card.
+        Calculates position for the new card, registers it in DB,
+        and adds the output connection line.
         """
         x, y = self.top_left
         center_x = x + (self.width // 2)
         bottom_y = y + self.height
 
         if direction == DOWN:
-            res_h = payload_object.height
-            res_w = payload_object.width
-            vx = center_x - (res_w // 2)
+            # Calculate geometric position
+            vx = center_x - (payload_card.width // 2)
             vy = y + VIRTUAL_CARD_OFFSET_Y
 
-            payload_object.top_left = (vx, vy)
+            # Register with the System (Assigns ID, Stores Pos)
+            CardSystem.register(payload_card, pos=(vx, vy), is_virtual=True)
 
-            # Add visual line for output (Vertical)
+            # Add visual line for output
             start = (center_x, bottom_y)
-            end = (center_x, vy)  # Straight down to the top of the new card
+            end = (center_x, vy)
             self.conn_lines.append((start, end, True))
 
-            return payload_object
+            return payload_card
         return None
 
-    def draw_connections(self, canvas):
+    def draw_connections(self):
+        if CardSystem.canvas is None: return
+
         LINE_COLOR = (0, 255, 0)
         THICKNESS = 3
         RADIUS = 10
 
         for start, end, is_connected in self.conn_lines:
-            cv2.line(canvas, start, end, LINE_COLOR, THICKNESS)
-            # Draw circle at destination
+            cv2.line(CardSystem.canvas, start, end, LINE_COLOR, THICKNESS)
             if is_connected:
-                cv2.circle(canvas, end, RADIUS, LINE_COLOR, -1)  # Filled if connected
+                cv2.circle(CardSystem.canvas, end, RADIUS, LINE_COLOR, -1)
             else:
-                cv2.circle(canvas, end, RADIUS, LINE_COLOR, THICKNESS)  # Hollow if searching
-                cv2.circle(canvas, end, RADIUS - 3, (0, 0, 0), -1)
+                cv2.circle(CardSystem.canvas, end, RADIUS, LINE_COLOR, THICKNESS)
+                cv2.circle(CardSystem.canvas, end, RADIUS - 3, (0, 0, 0), -1)
 
-    def render_img(self, canvas, img):
-        project_image_at(canvas, img, self.top_left)
+    def render_img(self, img):
+        if CardSystem.canvas is None: return
+        project_image_at(CardSystem.canvas, img, self.top_left)
 
     def reset_logic_state(self):
         self.output_generated = None
         self.resolved_inputs = {}
         self.conn_lines = []
 
-    def run_logic(self, canvas, active_cards, id_generator=None):
+    def run_logic(self):
         """
-        Runs logic AND rendering.
-        Returns a new Virtual Card if one is generated.
+        User Script. Pure behavior.
         """
         return None
 
 
 class ImageCard(BaseCard):
-    def __init__(self, id, pos, image_data, is_virtual=False):
+    def __init__(self, image_data):
         h, w = image_data.shape[:2] if image_data is not None else (0, 0)
-
-        # ImageCard has NO inputs
-        super().__init__(id, pos, width=w, height=h, inputs=[], outputs=[], is_virtual=is_virtual)
-
+        super().__init__(width=w, height=h, inputs=[], outputs=[])
         self.img_arr = image_data
         self.type = "source"
 
-    def run_logic(self, canvas, active_cards, id_generator=None):
-        # Image Logic: Just Render
+    def run_logic(self):
+        # Logic: None
+        # Render: Self
         if self.img_arr is not None:
-            self.render_img(canvas, self.img_arr)
+            self.render_img(self.img_arr)
         return None
 
 
 class KernelCard(BaseCard):
-    def __init__(self, id, pos, kernel_arr, is_virtual=False):
-        # KernelCard expects an ImageCard to the LEFT
-        super().__init__(id, pos, width=200, height=200,
+    def __init__(self, kernel_arr):
+        super().__init__(width=200, height=200,
                          inputs=[(LEFT, ImageCard)],
-                         outputs=[(DOWN, ImageCard)],
-                         is_virtual=is_virtual)
-
+                         outputs=[(DOWN, ImageCard)])
         self.type = "kernel"
         self.kernel_arr = kernel_arr
 
-    def run_logic(self, canvas, active_cards, id_generator=None):
+    def run_logic(self):
+        # 1. RENDER SELF (Visual Matrix)
+        # (Rendering code omitted for brevity - same as before but inside helper)
+        self._render_matrix_visual()
 
-        new_virtual_card = None
-
-        # 1. EVALUATE LOGIC
-        # Check if Dependency Resolved (populated by resolve_dependencies earlier)
+        # 2. LOGIC
         source = self.resolved_inputs.get(LEFT)
+        if not source or source.img_arr is None:
+            return None
 
-        if source and source.img_arr is not None:
-            # Process (Convolution)
-            result_arr = source.img_arr
-            for _ in range(10):  # Multi-pass for visibility
-                result_arr = cv2.filter2D(result_arr, -1, self.kernel_arr)
+        # Process
+        result_arr = source.img_arr
+        for _ in range(10):
+            result_arr = cv2.filter2D(result_arr, -1, self.kernel_arr)
 
-            # Determine ID
-            vid = -1
-            if id_generator:
-                vid = id_generator()
+        # Result Creation (Clean - No IDs/Pos)
+        result_card = ImageCard(result_arr)
 
-            # Create Result Object
-            result_card = ImageCard(vid, (0, 0), result_arr, is_virtual=True)
+        return self.project_output(DOWN, result_card)
 
-            # Position Output & Store
-            new_virtual_card = self.project_output(DOWN, result_card)
-
-        # 2. RENDER SELF
+    def _render_matrix_visual(self):
         viz_w, viz_h = self.width, self.height
         k_viz = np.ones((viz_h, viz_w, 3), dtype=np.uint8) * 255
         rows, cols = self.kernel_arr.shape
@@ -271,89 +340,71 @@ class KernelCard(BaseCard):
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
         cv2.rectangle(k_viz, (0, 0), (viz_w - 1, viz_h - 1), (0, 0, 0), 4)
-        self.render_img(canvas, k_viz)
-
-        return new_virtual_card
+        self.render_img(k_viz)
 
 
 class KernelAdditionCard(BaseCard):
-    """
-    Takes two kernels (Left/Right) and outputs a summed Kernel.
-    """
-
-    def __init__(self, id, pos, is_virtual=False):
-        super().__init__(id, pos, width=200, height=200,
+    def __init__(self):
+        super().__init__(width=200, height=200,
                          inputs=[(LEFT, KernelCard), (RIGHT, KernelCard)],
-                         outputs=[(DOWN, KernelCard)],
-                         is_virtual=is_virtual)
+                         outputs=[(DOWN, KernelCard)])
         self.type = "operation"
 
-    def run_logic(self, canvas, active_cards, id_generator=None):
-        new_virtual_card = None
+    def run_logic(self):
+        # 1. RENDER SELF
+        self._render_plus_visual()
 
-        # 1. EVALUATE LOGIC
+        # 2. LOGIC
         k_left = self.resolved_inputs.get(LEFT)
         k_right = self.resolved_inputs.get(RIGHT)
 
-        if k_left and k_right:
-            # Attempt addition
-            try:
-                # Simple addition (supports numpy broadcasting)
-                sum_arr = k_left.kernel_arr + k_right.kernel_arr
+        if not (k_left and k_right):
+            return None
 
-                # Determine ID
-                vid = -1
-                if id_generator:
-                    vid = id_generator()
+        try:
+            sum_arr = k_left.kernel_arr + k_right.kernel_arr
+            # Clean Creation
+            result_card = KernelCard(sum_arr)
+            return self.project_output(DOWN, result_card)
+        except Exception:
+            return None
 
-                # Create Result (Virtual Kernel)
-                # Note: We reuse KernelCard for the result type
-                result_card = KernelCard(vid, (0, 0), kernel_arr=sum_arr, is_virtual=True)
-                new_virtual_card = self.project_output(DOWN, result_card)
-            except Exception:
-                pass  # shape mismatch etc
-
-        # 2. RENDER SELF
-        # Draw a "Plus" visualization
+    def _render_plus_visual(self):
         viz = np.ones((self.height, self.width, 3), dtype=np.uint8) * 240
         cv2.rectangle(viz, (0, 0), (self.width - 1, self.height - 1), (0, 0, 0), 4)
-
-        # Draw Plus Symbol
         center_x, center_y = self.width // 2, self.height // 2
         line_len = 40
         cv2.line(viz, (center_x - line_len, center_y), (center_x + line_len, center_y), (0, 0, 0), 5)
         cv2.line(viz, (center_x, center_y - line_len), (center_x, center_y + line_len), (0, 0, 0), 5)
-
-        self.render_img(canvas, viz)
-
-        return new_virtual_card
+        self.render_img(viz)
 
 
-# --- 3. FACTORY & HELPERS ---
+# --- 4. FACTORY & HELPERS ---
 
-def create_physical_card(marker_id, pos):
+def create_physical_card_instance(marker_id):
+    """
+    Creates the logic instance. Registration happens in Main.
+    """
     if marker_id == 10:
-        return ImageCard(10, pos, SOURCE_IMG, is_virtual=False)
+        return ImageCard(SOURCE_IMG)
     elif marker_id == 20:
         k_size = 3
         blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
-        return KernelCard(20, pos, kernel_arr=blur_kernel, is_virtual=False)
+        return KernelCard(blur_kernel)
     elif marker_id == 21:
         # Vertical Gradient (Sobel Y)
         vertical_grad_kernel = np.array([[-1, -2, -1],
                                          [0, 0, 0],
                                          [1, 2, 1]], dtype=np.float32)
-        return KernelCard(21, pos, kernel_arr=vertical_grad_kernel, is_virtual=False)
+        return KernelCard(vertical_grad_kernel)
     elif marker_id == 22:
         # Horizontal Gradient (Sobel X)
         horizonal_grad_kernel = np.array([[-1, 0, 1],
                                           [-2, 0, 2],
                                           [-1, 0, 1]], dtype=np.float32)
-        return KernelCard(22, pos, kernel_arr=horizonal_grad_kernel, is_virtual=False)
-    elif marker_id == 23:
-        return KernelAdditionCard(23, pos, is_virtual=False)
-    elif marker_id == 30:
-        return KernelAdditionCard(30, pos, is_virtual=False)
+        return KernelCard(horizonal_grad_kernel)
+    elif marker_id == 23 or marker_id == 30:
+        return KernelAdditionCard()
     return None
 
 
@@ -406,8 +457,8 @@ def main():
 
     print("System Started. Press 'q' to exit.")
 
-    # Persistent state for physical cards
-    physical_cards_state = {}
+    # Persistent Map: Marker ID -> Card Instance
+    physical_cards_map = {}
 
     while True:
         ret, frame = cap.read()
@@ -418,6 +469,9 @@ def main():
         M_inv = np.linalg.inv(M) if M is not None else None
 
         projector_canvas = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
+
+        # 1. SETUP CONTEXT
+        CardSystem.reset_frame(projector_canvas)
 
         # --- DEBUG VISUALIZATION ---
         if DEBUG_MODE and corners is not None and ids is not None:
@@ -441,88 +495,78 @@ def main():
                     marker_btm_left = marker_corners[3]
                     cx, cy = transform_point(marker_btm_left, M)
 
-                    if mid in physical_cards_state:
-                        # Update existing
-                        card = physical_cards_state[mid]
-                        # Smooth position
-                        old_x, old_y = card.top_left
-                        smooth_x = int(old_x * 0.8 + cx * 0.2)
-                        smooth_y = int(old_y * 0.8 + cy * 0.2)
-                        card.top_left = (smooth_x, smooth_y)
-                        card.ttl = CARD_TTL
-                    else:
-                        # Create new
-                        new_card = create_physical_card(mid, (cx, cy))
+                    # Existence Check
+                    if mid not in physical_cards_map:
+                        new_card = create_physical_card_instance(mid)
                         if new_card:
-                            physical_cards_state[mid] = new_card
+                            physical_cards_map[mid] = new_card
+                            # Register with DB
+                            CardSystem.register(new_card, id=str(mid), pos=(cx, cy), is_virtual=False)
 
-        # Decay
+                    # Update Position in DB
+                    card = physical_cards_map.get(mid)
+                    if card:
+                        # Smooth position logic (low-pass filter)
+                        CardSystem.update_physical(card, (cx, cy))
+
+        # Decay Logic
         keys_to_remove = []
-        for mid, card in physical_cards_state.items():
+        for mid, card in physical_cards_map.items():
             if mid not in seen_marker_ids:
-                card.ttl -= 1
-                if card.ttl <= 0:
+                CardSystem.decrease_ttl(card)
+                if CardSystem.get_ttl(card) <= 0:
                     keys_to_remove.append(mid)
+
         for k in keys_to_remove:
-            del physical_cards_state[k]
+            card = physical_cards_map[k]
+            CardSystem.unregister(card)
+            del physical_cards_map[k]
 
-        # --- UNIFIED LOGIC LOOP WITH TOPOLOGICAL SORT ---
+        # --- UNIFIED LOGIC LOOP ---
 
-        # ID Generator for Virtual Cards (resets every frame)
-        virtual_id_counter = 0
-
-        def get_next_virtual_id():
-            nonlocal virtual_id_counter
-            virtual_id_counter += 1
-            return f"v-{virtual_id_counter}"
-
-        # 1. Start with known physical cards
-        active_cards = list(physical_cards_state.values())
+        active_cards = list(physical_cards_map.values())
         for c in active_cards: c.reset_logic_state()
 
-        # Dummy canvas for logic passes (to prevent drawing trails/ghosts)
+        # Dummy canvas for logic passes
         dummy_canvas = np.zeros_like(projector_canvas)
 
-        # 2. SIMULATION PHASE (Resolve dependencies & Generate Virtuals)
+        # 2. SIMULATION PHASE
         for depth in range(MAX_CHAIN_DEPTH):
-
-            # A. Resolve Dependencies
+            # A. Resolve
             for card in active_cards:
                 card.resolve_dependencies(active_cards)
 
             # B. Sort
             active_cards.sort(key=lambda c: c.get_priority())
 
-            # C. Run Logic (on dummy canvas)
+            # C. Run Logic (No Render, only state update)
+            # Temporarily swap context to dummy to prevent drawing during calculation
+            CardSystem.canvas = dummy_canvas
+
             new_virtuals = []
             for card in active_cards:
                 if card.output_generated is None:
-                    # Pass the ID generator to the logic function
-                    out = card.run_logic(dummy_canvas, active_cards, id_generator=get_next_virtual_id)
+                    out = card.run_logic()
                     if out:
                         new_virtuals.append(out)
                         card.output_generated = out
                 else:
-                    # Update logic state for existing chains if needed
-                    card.run_logic(dummy_canvas, active_cards, id_generator=get_next_virtual_id)
+                    card.run_logic()
 
             if not new_virtuals:
                 break
-
             active_cards.extend(new_virtuals)
 
         # 3. RENDER PHASE (Final Draw)
-        # Now that the graph is stable, we do ONE pass to draw everything cleanly.
+        CardSystem.canvas = projector_canvas  # Restore real canvas
+
         for card in active_cards:
-            # Re-resolve dependencies to ensure connection lines are fresh/correct for this frame
+            # Re-resolve for fresh lines
             card.resolve_dependencies(active_cards)
 
-            # Run logic one last time on the REAL canvas to draw content & add output lines
-            # (We pass the generator, but new IDs shouldn't typically be used here as outputs are already generated)
-            card.run_logic(projector_canvas, active_cards, id_generator=get_next_virtual_id)
-
-            # Draw the connection lines
-            card.draw_connections(projector_canvas)
+            # Run logic to Draw Content & Lines
+            card.run_logic()
+            card.draw_connections()
 
         # --- DEBUG OVERLAY ---
         if DEBUG_MODE and M_inv is not None:
@@ -542,8 +586,7 @@ def main():
                     color = (0, 255, 255) if card.is_virtual else (255, 0, 0)
                     cv2.polylines(frame, [cam_pts], True, color, 2)
 
-                    # Update Label to show ID
-                    label = f"VIRTUAL ({card.id})" if card.is_virtual else f"PHYSICAL ({card.id})"
+                    label = f"{card.id}"
                     cv2.putText(frame, label, tuple(cam_pts[0][0]),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
