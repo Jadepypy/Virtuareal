@@ -334,17 +334,19 @@ class KernelAdditionCard(BaseCard):
 def create_physical_card(marker_id, pos):
     if marker_id == 10:
         return ImageCard(10, pos, SOURCE_IMG, is_virtual=False)
-    elif marker_id == 20:
+    if marker_id == 11:
+        return ImageCard(10, pos, SOURCE_IMG, is_virtual=False)
+    elif marker_id == 22:
         k_size = 3
         blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
         return KernelCard(20, pos, kernel_arr=blur_kernel, is_virtual=False)
-    elif marker_id == 21:
+    elif marker_id == 20:
         # Vertical Gradient (Sobel Y)
         vertical_grad_kernel = np.array([[-1, -2, -1],
                                          [0, 0, 0],
                                          [1, 2, 1]], dtype=np.float32)
         return KernelCard(21, pos, kernel_arr=vertical_grad_kernel, is_virtual=False)
-    elif marker_id == 22:
+    elif marker_id == 21:
         # Horizontal Gradient (Sobel X)
         horizonal_grad_kernel = np.array([[-1, 0, 1],
                                           [-2, 0, 2],
@@ -352,8 +354,6 @@ def create_physical_card(marker_id, pos):
         return KernelCard(22, pos, kernel_arr=horizonal_grad_kernel, is_virtual=False)
     elif marker_id == 23:
         return KernelAdditionCard(23, pos, is_virtual=False)
-    elif marker_id == 30:
-        return KernelAdditionCard(30, pos, is_virtual=False)
     return None
 
 
