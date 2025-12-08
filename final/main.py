@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import types
+import json
 
 # --- CONFIGURATION ---
 CANVAS_W, CANVAS_H = 1920, 1080
@@ -15,6 +16,7 @@ VIRTUAL_CARD_OFFSET_Y = 220
 PROBE_DISTANCE = 100
 MAX_CHAIN_DEPTH = 5
 CARD_TTL = 15
+INPUT_LINK_TTL = 10  # [NEW] Frames a connection stays alive after losing physical tracking
 
 # Directions
 LEFT = "LEFT"
@@ -41,6 +43,7 @@ SOURCE_IMG = load_image_resource("A.jpg", width=250)
 
 # --- 2. LOGIC SCRIPTS (Universal Library) ---
 # These are pure logic bodies. They will be wrapped in 'def run_logic(self):' at runtime.
+# Kept here as defaults for Virtual Cards created at runtime.
 
 IMAGE_SCRIPT = """
 # Image Logic: Just Render
@@ -229,6 +232,7 @@ class BaseCard:
 
         # RUNTIME STATE (Logic only)
         self.resolved_inputs = {}  # { Direction: CardObject }
+        self.input_ttls = {}  # { Direction: Frames_Left } [NEW] Persistence
         self.output_generated = None
         self.conn_lines = []
 
@@ -290,7 +294,8 @@ class BaseCard:
         return (x1 < px < x2) and (y1 < py < y2)
 
     def resolve_dependencies(self, active_cards):
-        self.resolved_inputs = {}
+        # We DO NOT wipe self.resolved_inputs here anymore.
+        # We rely on TTL decay to remove old inputs.
         self.conn_lines = []
 
         x, y = self.top_left
@@ -318,12 +323,31 @@ class BaseCard:
                         found_card = candidate
                         break
 
-                        # 3. Store Result
+            # 3. Persistence Logic (Debouncing)
             if found_card:
+                # HIT: Update input and reset TTL
                 self.resolved_inputs[direction] = found_card
+                self.input_ttls[direction] = INPUT_LINK_TTL
+            else:
+                # MISS: Check if we have a lingering connection
+                if direction in self.input_ttls:
+                    self.input_ttls[direction] -= 1
+                    if self.input_ttls[direction] <= 0:
+                        # Time's up, remove connection
+                        self.resolved_inputs.pop(direction, None)
+                        del self.input_ttls[direction]
+                    else:
+                        # Persist for another frame (Visualization uses last known pos)
+                        # We keep resolved_inputs[direction] as is
+                        pass
+                else:
+                    # Clean up just in case
+                    self.resolved_inputs.pop(direction, None)
 
             # 4. Store Visuals
-            self.conn_lines.append((vis_start, vis_end, found_card is not None))
+            # If we have a resolved input (even from persistence), we draw it
+            is_connected = direction in self.resolved_inputs
+            self.conn_lines.append((vis_start, vis_end, is_connected))
 
     def get_priority(self):
         if not self.resolved_inputs:
@@ -396,8 +420,8 @@ class BaseCard:
         project_image_at(CardSystem.canvas, img, self.top_left)
 
     def reset_logic_state(self):
-        self.output_generated = None
-        self.resolved_inputs = {}
+        # [MODIFIED] Do NOT wipe output_generated or resolved_inputs here.
+        # We rely on Persistence/TTL to handle state.
         self.conn_lines = []
 
     def run_logic(self):
@@ -440,34 +464,69 @@ K_BLUR_3 = np.ones((3, 3), np.float32) / 9.0
 K_SOBEL_Y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
 K_SOBEL_X = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
 
-# 2. Universal Script Registry
-# Maps Python Classes to their Logic Script Strings
+# 2. Universal Script Registry (Fallback for Virtual Cards)
 CLASS_SCRIPTS = {
     ImageCard: IMAGE_SCRIPT,
     KernelCard: KERNEL_SCRIPT,
     KernelAdditionCard: ADDITION_SCRIPT
 }
 
-# 3. Card Configuration Library
-CARD_LIBRARY = {
-    10: {"class": ImageCard, "args": [SOURCE_IMG]},
-    20: {"class": KernelCard, "args": [K_BLUR_3]},
-    21: {"class": KernelCard, "args": [K_SOBEL_Y]},
-    22: {"class": KernelCard, "args": [K_SOBEL_X]},
-    23: {"class": KernelAdditionCard, "args": []},
-    30: {"class": KernelAdditionCard, "args": []}
+
+# 3. Dynamic Configuration Loading
+def load_card_library_json(path="cards.json"):
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading card library: {e}")
+        return {}
+
+
+JSON_CARD_LIBRARY = load_card_library_json()
+
+# Class Name to Type Map
+CLASS_NAME_MAP = {
+    "ImageCard": ImageCard,
+    "KernelCard": KernelCard,
+    "KernelAdditionCard": KernelAdditionCard
 }
 
 
 def create_physical_card_instance(marker_id):
     """
-    Creates the logic instance using the CARD_LIBRARY look-up.
+    Creates the logic instance using the JSON_CARD_LIBRARY look-up.
     """
-    config = CARD_LIBRARY.get(marker_id)
-    if config:
-        # Script loading is now handled automatically in BaseCard.__init__
-        return config["class"](*config["args"])
-    return None
+    key = str(marker_id)
+    if key not in JSON_CARD_LIBRARY:
+        return None
+
+    config = JSON_CARD_LIBRARY[key]
+    class_name = config.get("class")
+    args_list = config.get("args", [])
+    script_str = config.get("script", "")
+
+    cls_type = CLASS_NAME_MAP.get(class_name)
+    if not cls_type:
+        return None
+
+    # Resolve args from Global Scope (Strings -> Objects)
+    resolved_args = []
+    for arg in args_list:
+        if isinstance(arg, str) and arg in globals():
+            resolved_args.append(globals()[arg])
+        else:
+            resolved_args.append(arg)
+
+    # Instantiate
+    try:
+        instance = cls_type(*resolved_args)
+        # Explicitly load the script from JSON (Overrides default/universal)
+        if script_str:
+            instance.load_script(script_str)
+        return instance
+    except Exception as e:
+        print(f"Error instantiating card {marker_id}: {e}")
+        return None
 
 
 def project_image_at(canvas, img, top_left):
@@ -487,16 +546,40 @@ def project_image_at(canvas, img, top_left):
         canvas[c_y1:c_y2, c_x1:c_x2] = img[i_y1:i_y2, i_x1:i_x2]
 
 
-def get_homography(corners, ids):
-    if ids is None: return None
-    found_anchors = {}
-    for i, marker_id in enumerate(ids.flatten()):
-        if marker_id in ANCHOR_IDS:
-            found_anchors[marker_id] = np.mean(corners[i][0], axis=0)
-    if len(found_anchors) < 4: return None
-    src = np.array([found_anchors[0], found_anchors[1], found_anchors[2], found_anchors[3]], dtype="float32")
-    dst = np.array([[0, 0], [CANVAS_W, 0], [CANVAS_W, CANVAS_H], [0, CANVAS_H]], dtype="float32")
-    return cv2.getPerspectiveTransform(src, dst)
+def get_homography_from_history(anchor_history):
+    """
+    Calculates homography using all available accumulated anchors.
+    Tolerates missing anchors in the current frame as long as they were seen previously.
+    """
+    if len(anchor_history) < 4:
+        return None
+
+    src_points = []
+    dst_points = []
+
+    # Define ideal canvas corners for ANCHOR_IDS [0, 1, 2, 3]
+    # Assumes order: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+    ideal_corners = {
+        0: (0, 0),
+        1: (CANVAS_W, 0),
+        2: (CANVAS_W, CANVAS_H),
+        3: (0, CANVAS_H)
+    }
+
+    for mid, pt in anchor_history.items():
+        if mid in ideal_corners:
+            src_points.append(pt)
+            dst_points.append(ideal_corners[mid])
+
+    if len(src_points) < 4:
+        return None
+
+    src = np.array(src_points, dtype=float)
+    dst = np.array(dst_points, dtype=float)
+
+    # Use findHomography with RANSAC for robustness
+    M, _ = cv2.findHomography(src, dst, cv2.RANSAC, 5.0)
+    return M
 
 
 def transform_point(point, M):
@@ -517,17 +600,31 @@ def main():
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-    print("System Started. Press 'q' to exit.")
+    print("System Started. Press 'q' to exit. Press 'r' to reset calibration.")
 
     # Persistent Map: Marker ID -> Card Instance
     physical_cards_map = {}
+
+    # [NEW] Persistent Anchor Calibration History
+    anchor_history = {}
 
     while True:
         ret, frame = cap.read()
         if not ret: break
 
         corners, ids, rejected = detector.detectMarkers(frame)
-        M = get_homography(corners, ids)
+
+        # [NEW] Update Anchor History
+        if ids is not None:
+            for i, marker_id in enumerate(ids.flatten()):
+                if marker_id in ANCHOR_IDS:
+                    # Update the known position of this anchor
+                    # Using the center of the marker
+                    center = np.mean(corners[i][0], axis=0)
+                    anchor_history[marker_id] = center
+
+        # [NEW] Calculate Homography from accumulated history
+        M = get_homography_from_history(anchor_history)
         M_inv = np.linalg.inv(M) if M is not None else None
 
         projector_canvas = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
@@ -536,14 +633,18 @@ def main():
         CardSystem.reset_frame(projector_canvas)
 
         # --- DEBUG VISUALIZATION ---
-        if DEBUG_MODE and corners is not None and ids is not None:
-            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-            for i, marker_id in enumerate(ids.flatten()):
-                if marker_id in ANCHOR_IDS:
-                    pt = np.mean(corners[i][0], axis=0).astype(int)
-                    cv2.circle(frame, tuple(pt), 8, (0, 0, 255), -1)
-                    cv2.putText(frame, "Anchor", (pt[0] + 10, pt[1]),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        if DEBUG_MODE:
+            # Draw all currently detected markers
+            if corners is not None and ids is not None:
+                cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+
+            # Draw persistent anchor memory (Circles)
+            for aid, pt in anchor_history.items():
+                pt_int = tuple(pt.astype(int))
+                # Green = Locked in memory
+                cv2.circle(frame, pt_int, 12, (0, 255, 0), 2)
+                cv2.putText(frame, f"A-{aid}", (pt_int[0] + 15, pt_int[1]),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         # --- UPDATE PHYSICAL CARDS ---
         seen_marker_ids = set()
@@ -607,12 +708,14 @@ def main():
 
             new_virtuals = []
             for card in active_cards:
-                if card.output_generated is None:
-                    card.run_logic()
-                    if card.output_generated:
+                # Always run logic (updates internal state if possible)
+                card.run_logic()
+
+                # Check if an output exists (either newly created OR persisted from previous frames)
+                if card.output_generated:
+                    # Only add if not already processing
+                    if card.output_generated not in active_cards and card.output_generated not in new_virtuals:
                         new_virtuals.append(card.output_generated)
-                else:
-                    card.run_logic()
 
             if not new_virtuals:
                 break
@@ -655,7 +758,11 @@ def main():
         if DEBUG_MODE:
             cv2.imshow("Debug Input", frame)
 
-        if cv2.waitKey(1) == ord('q'): break
+        key = cv2.waitKey(1)
+        if key == ord('q'): break
+        if key == ord('r'):  # [NEW] Reset Calibration
+            anchor_history.clear()
+            print("Calibration Reset")
 
     cap.release()
     cv2.destroyAllWindows()
