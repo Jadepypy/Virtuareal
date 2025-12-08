@@ -36,17 +36,16 @@ def load_image_resource(filename, width=200):
 
 
 SOURCE_IMG = load_image_resource("A.jpg", width=250)
-KERNEL_IMG = load_image_resource("blur3.png", width=200)
 
 
 # --- 2. CLASS LIBRARY (Refactored) ---
 
 class BaseCard:
     """
-    Base class defining the valid area, connectivity logic, and drawing.
+    Base class with declarative inputs/outputs and dependency resolution logic.
     """
 
-    def __init__(self, id, pos, width, height, is_virtual=False):
+    def __init__(self, id, pos, width, height, inputs=None, outputs=None, is_virtual=False):
         self.id = id
         self.top_left = pos  # (x, y)
         self.width = width
@@ -54,14 +53,18 @@ class BaseCard:
         self.is_virtual = is_virtual
         self.ttl = CARD_TTL
 
-        # Connection Visualization State
-        self.conn_input_start = None
-        self.conn_input_end = None
-        self.conn_output_start = None
-        self.conn_output_end = None
+        # DECLARATIVE SPECS
+        # list of tuples: [(Direction, ClassType)]
+        self.inputs_spec = inputs or []
+        # list of tuples: [(Direction, ClassType)]
+        self.outputs_spec = outputs or []
 
-        # Logic State
+        # RUNTIME STATE
+        self.resolved_inputs = {}  # { Direction: CardObject }
         self.output_generated = None
+
+        # Connection Visualization State
+        self.conn_lines = []  # list of (start_pt, end_pt, is_connected) for drawing
 
     def is_point_inside(self, point):
         px, py = point
@@ -70,158 +73,203 @@ class BaseCard:
         y2 = y1 + self.height
         return (x1 < px < x2) and (y1 < py < y2)
 
-    def input(self, direction, target_type_class, active_cards):
+    def resolve_dependencies(self, active_cards):
         """
-        Looks for a neighbor card in the given direction.
+        Scans neighbors based on inputs_spec and populates resolved_inputs.
         """
+        self.resolved_inputs = {}
+        self.conn_lines = []
+
         x, y = self.top_left
         center_y = y + (self.height // 2)
 
-        probe_point = (0, 0)
+        for direction, target_class in self.inputs_spec:
+            probe_point = (0, 0)
+            vis_start = (0, 0)
 
-        # 1. Determine Probe Point
-        if direction == LEFT:
-            probe_point = (x - PROBE_DISTANCE, center_y)
-            self.conn_input_start = (x, center_y)  # Draw from left edge
-            self.conn_input_end = probe_point  # To probe point
-        # (Add other directions here if needed later)
+            # 1. Determine Probe Geometry
+            if direction == LEFT:
+                probe_point = (x - PROBE_DISTANCE, center_y)
+                vis_start = (x, center_y)
 
-        # 2. Hit Test against Active Cards
-        found_card = None
-        for candidate in active_cards:
-            if candidate is not self and isinstance(candidate, target_type_class):
-                if candidate.is_point_inside(probe_point):
-                    found_card = candidate
+            # 2. Hit Test
+            found_card = None
+            vis_end = probe_point  # Default to probe tip if nothing found
 
-                    # Snap visual connection to candidate's edge
-                    if direction == LEFT:
-                        src_right_x = candidate.top_left[0] + candidate.width
-                        src_center_y = candidate.top_left[1] + (candidate.height // 2)
-                        self.conn_input_end = (src_right_x, src_center_y)
-                    break
+            for candidate in active_cards:
+                if candidate is not self and isinstance(candidate, target_class):
+                    if candidate.is_point_inside(probe_point):
+                        found_card = candidate
 
-        return found_card
+                        # Snap visual
+                        if direction == LEFT:
+                            src_right_x = candidate.top_left[0] + candidate.width
+                            src_center_y = candidate.top_left[1] + (candidate.height // 2)
+                            vis_end = (src_right_x, src_center_y)
+                        break
 
-    def output(self, direction, payload_object):
+            # 3. Store Result
+            if found_card:
+                self.resolved_inputs[direction] = found_card
+
+            # 4. Store Visuals
+            self.conn_lines.append((vis_start, vis_end, found_card is not None))
+
+    def get_priority(self):
         """
-        Outputs a class object (Virtual Card) in the given direction.
+        Calculates topological depth.
+        0 = Leaf / No Dependencies met
+        N = 1 + Max Depth of inputs
+        """
+        if not self.resolved_inputs:
+            return 0
+
+        # Priority is 1 + highest priority of any connected input
+        max_input_prio = 0
+        for direction, card in self.resolved_inputs.items():
+            max_input_prio = max(max_input_prio, card.get_priority())
+
+        return 1 + max_input_prio
+
+    def project_output(self, direction, payload_object):
+        """
+        Helper to position the output virtual card.
         """
         x, y = self.top_left
         center_x = x + (self.width // 2)
         bottom_y = y + self.height
 
-        new_pos = (0, 0)
-
-        # 1. Determine Output Position
         if direction == DOWN:
-            # Center the result horizontally below
             res_h = payload_object.height
             res_w = payload_object.width
-
             vx = center_x - (res_w // 2)
             vy = y + VIRTUAL_CARD_OFFSET_Y
-            new_pos = (vx, vy)
 
-            # Set visuals
-            self.conn_output_start = (center_x, bottom_y)
-            self.conn_output_end = (center_x + (vx - center_x) + (res_w // 2), vy)
+            payload_object.top_left = (vx, vy)
 
-        # 2. Update the Payload Object's position
-        payload_object.top_left = new_pos
+            # Add visual line for output
+            start = (center_x, bottom_y)
+            end = (center_x + (vx - center_x) + (res_w // 2), vy)
+            self.conn_lines.append((start, end, True))
 
-        return payload_object
+            return payload_object
+        return None
 
     def draw_connections(self, canvas):
         LINE_COLOR = (0, 255, 0)
         THICKNESS = 3
         RADIUS = 10
 
-        # Draw Input Line
-        if self.conn_input_start and self.conn_input_end:
-            cv2.line(canvas, self.conn_input_start, self.conn_input_end, LINE_COLOR, THICKNESS)
-            cv2.circle(canvas, self.conn_input_end, RADIUS, LINE_COLOR, THICKNESS)
-            cv2.circle(canvas, self.conn_input_end, RADIUS - 3, (0, 0, 0), -1)
+        for start, end, is_connected in self.conn_lines:
+            cv2.line(canvas, start, end, LINE_COLOR, THICKNESS)
+            # Draw circle at destination
+            if is_connected:
+                cv2.circle(canvas, end, RADIUS, LINE_COLOR, -1)  # Filled if connected
+            else:
+                cv2.circle(canvas, end, RADIUS, LINE_COLOR, THICKNESS)  # Hollow if searching
+                cv2.circle(canvas, end, RADIUS - 3, (0, 0, 0), -1)
 
-        # Draw Output Line
-        if self.conn_output_start and self.conn_output_end:
-            cv2.line(canvas, self.conn_output_start, self.conn_output_end, LINE_COLOR, THICKNESS)
-            cv2.circle(canvas, self.conn_output_end, RADIUS, LINE_COLOR, -1)
-
-    def render(self, canvas):
-        """
-        Draws the card's visual content. Overridden by subclasses.
-        """
-        pass
+    def render_img(self, canvas, img):
+        project_image_at(canvas, img, self.top_left)
 
     def reset_logic_state(self):
         self.output_generated = None
-        self.conn_input_start = None
-        self.conn_input_end = None
-        self.conn_output_start = None
-        self.conn_output_end = None
+        self.resolved_inputs = {}
+        self.conn_lines = []
+
+    def run_logic(self, canvas, active_cards):
+        """
+        Runs logic AND rendering.
+        Returns a new Virtual Card if one is generated.
+        """
+        return None
 
 
 class ImageCard(BaseCard):
-    """
-    Represents data (an image). Can be physical or virtual.
-    """
-
     def __init__(self, id, pos, image_data, is_virtual=False):
         h, w = image_data.shape[:2] if image_data is not None else (0, 0)
-        super().__init__(id, pos, width=w, height=h, is_virtual=is_virtual)
-        self.img_arr = image_data
-        self.type = "source"  # Keep type tag for debug compatibility
 
-    def render(self, canvas):
-        # Draw the image data
-        project_image_at(canvas, self.img_arr, self.top_left)
+        # ImageCard has NO inputs
+        super().__init__(id, pos, width=w, height=h, inputs=[], outputs=[], is_virtual=is_virtual)
+
+        self.img_arr = image_data
+        self.type = "source"
+
+    def run_logic(self, canvas, active_cards):
+        # Image Logic: Just Render
+        if self.img_arr is not None:
+            self.render_img(canvas, self.img_arr)
+        return None
 
 
 class KernelCard(BaseCard):
-    """
-    Represents an operation.
-    """
+    def __init__(self, id, pos, kernel_arr, is_virtual=False):
+        # KernelCard expects an ImageCard to the LEFT
+        super().__init__(id, pos, width=200, height=200,
+                         inputs=[(LEFT, ImageCard)],
+                         outputs=[(DOWN, ImageCard)],
+                         is_virtual=is_virtual)
 
-    def __init__(self, id, pos, image_data, is_virtual=False):
-        h, w = image_data.shape[:2] if image_data is not None else (0, 0)
-        super().__init__(id, pos, width=w, height=h, is_virtual=is_virtual)
-        self.kernel_arr = None  # Placeholder for actual matrix if needed
-        self.img_representation = image_data  # Visual icon
         self.type = "kernel"
+        self.kernel_arr = kernel_arr
 
-    def convolution(self, source_card):
-        if source_card.img_arr is None: return None
+    def run_logic(self, canvas, active_cards):
 
-        # Box blur logic
-        k_size = 15
-        blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
-        result_arr = cv2.filter2D(source_card.img_arr, -1, blur_kernel)
+        new_virtual_card = None
 
-        # Return a new Virtual ImageCard (ID -1)
-        return ImageCard(-1, (0, 0), result_arr, is_virtual=True)
+        # 1. EVALUATE LOGIC
+        # Check if Dependency Resolved (populated by resolve_dependencies earlier)
+        source = self.resolved_inputs.get(LEFT)
 
-    def run_logic(self, active_cards):
-        """
-        The main execution block for this card.
-        """
-        # 1. INPUT: Look LEFT for an ImageCard
-        source = self.input(LEFT, ImageCard, active_cards)
+        if source and source.img_arr is not None:
+            # Process (Convolution)
+            result_arr = source.img_arr
+            for _ in range(10):  # Multi-pass for visibility
+                result_arr = cv2.filter2D(result_arr, -1, self.kernel_arr)
 
-        if source:
-            # 2. PROCESS: Convolve
-            result_card = self.convolution(source)
+            # Create Result Object
+            result_card = ImageCard(-1, (0, 0), result_arr, is_virtual=True)
 
-            # 3. OUTPUT: Send result DOWN
-            if result_card:
-                final_card = self.output(DOWN, result_card)
-                self.output_generated = final_card
-                return final_card
+            # Position Output & Store
+            new_virtual_card = self.project_output(DOWN, result_card)
 
-        return None
+        # 2. RENDER SELF
+        viz_w, viz_h = self.width, self.height
+        k_viz = np.ones((viz_h, viz_w, 3), dtype=np.uint8) * 255
+        rows, cols = self.kernel_arr.shape
+        color = (0, 0, 0)
+        step_x = viz_w / cols
+        step_y = viz_h / rows
 
-    def render(self, canvas):
-        # Draw the kernel icon/representation
-        project_image_at(canvas, self.img_representation, self.top_left)
+        for i in range(cols + 1):
+            x = int(i * step_x)
+            cv2.line(k_viz, (x, 0), (x, viz_h), color, 2)
+        for i in range(rows + 1):
+            y = int(i * step_y)
+            cv2.line(k_viz, (0, y), (viz_w, y), color, 2)
+
+        if rows <= 5 and cols <= 5:
+            for r in range(rows):
+                for c in range(cols):
+                    val = self.kernel_arr[r, c]
+                    text = f"{val:.2f}"
+                    if abs(val - 1 / 9) < 0.001:
+                        text = "1/9"
+                    elif abs(val - 1.0) < 0.001:
+                        text = "1"
+                    elif abs(val) < 0.001:
+                        text = "0"
+
+                    center_x = int(c * step_x + step_x / 2)
+                    center_y = int(r * step_y + step_y / 2)
+                    (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    cv2.putText(k_viz, text, (center_x - text_w // 2, center_y + text_h // 2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
+        cv2.rectangle(k_viz, (0, 0), (viz_w - 1, viz_h - 1), (0, 0, 0), 4)
+        self.render_img(canvas, k_viz)
+
+        return new_virtual_card
 
 
 # --- 3. FACTORY & HELPERS ---
@@ -230,34 +278,21 @@ def create_physical_card(marker_id, pos):
     if marker_id == 10:
         return ImageCard(10, pos, SOURCE_IMG, is_virtual=False)
     elif marker_id == 20:
-        return KernelCard(20, pos, KERNEL_IMG, is_virtual=False)
+        k_size = 3
+        blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
+        return KernelCard(20, pos, kernel_arr=blur_kernel, is_virtual=False)
+    elif marker_id == 21:
+        k_size = 3
+        blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
+        return KernelCard(21, pos, kernel_arr=blur_kernel, is_virtual=False)
+    elif marker_id == 22:
+        k_size = 3
+        blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
+        return KernelCard(22, pos, kernel_arr=blur_kernel, is_virtual=False)
     return None
 
 
-def resolve_interactions(all_active_cards):
-    """
-    Iterative solver calling .run_logic() on KernelCards.
-    """
-    for depth in range(MAX_CHAIN_DEPTH):
-        new_virtuals_this_pass = []
-
-        for card in all_active_cards:
-            # Run logic only on Kernels that haven't fired yet
-            if isinstance(card, KernelCard) and card.output_generated is None:
-                new_virtual = card.run_logic(all_active_cards)
-                if new_virtual:
-                    new_virtuals_this_pass.append(new_virtual)
-
-        if not new_virtuals_this_pass:
-            break
-
-        all_active_cards.extend(new_virtuals_this_pass)
-
-
-# --- 4. VISION & RENDER LAYER ---
-
 def project_image_at(canvas, img, top_left):
-    """Draws image safely within canvas bounds"""
     if img is None: return
     h, w, _ = img.shape
     x1, y1 = top_left
@@ -366,29 +401,62 @@ def main():
         for k in keys_to_remove:
             del physical_cards_state[k]
 
-        # --- RUN LOGIC ---
+        # --- UNIFIED LOGIC LOOP WITH TOPOLOGICAL SORT ---
+
+        # 1. Start with known physical cards
         active_cards = list(physical_cards_state.values())
+        for c in active_cards: c.reset_logic_state()
 
-        # Reset transient state
+        # Dummy canvas for logic passes (to prevent drawing trails/ghosts)
+        dummy_canvas = np.zeros_like(projector_canvas)
+
+        # 2. SIMULATION PHASE (Resolve dependencies & Generate Virtuals)
+        for depth in range(MAX_CHAIN_DEPTH):
+
+            # A. Resolve Dependencies
+            for card in active_cards:
+                card.resolve_dependencies(active_cards)
+
+            # B. Sort
+            active_cards.sort(key=lambda c: c.get_priority())
+
+            # C. Run Logic (on dummy canvas)
+            new_virtuals = []
+            for card in active_cards:
+                if card.output_generated is None:
+                    # We pass dummy_canvas because we only want the logic side-effects (new virtuals)
+                    # not the visual side-effects (drawing) yet.
+                    out = card.run_logic(dummy_canvas, active_cards)
+                    if out:
+                        new_virtuals.append(out)
+                        card.output_generated = out
+                else:
+                    # Update logic state for existing chains if needed
+                    card.run_logic(dummy_canvas, active_cards)
+
+            if not new_virtuals:
+                break
+
+            active_cards.extend(new_virtuals)
+
+        # 3. RENDER PHASE (Final Draw)
+        # Now that the graph is stable, we do ONE pass to draw everything cleanly.
         for card in active_cards:
-            card.reset_logic_state()
+            # Re-resolve dependencies to ensure connection lines are fresh/correct for this frame
+            card.resolve_dependencies(active_cards)
 
-        # Resolve
-        resolve_interactions(active_cards)
+            # Run logic one last time on the REAL canvas to draw content & add output lines
+            card.run_logic(projector_canvas, active_cards)
 
-        # --- RENDER ---
-        for card in active_cards:
-            # 1. Draw Content (Polymorphic)
-            card.render(projector_canvas)
-
-            # 2. Draw Connections
+            # Draw the connection lines
             card.draw_connections(projector_canvas)
 
-            # 3. Draw Debug Hitboxes
-            if DEBUG_MODE and M_inv is not None:
-                # Probe point logic is now inside card.conn_input_end
-                if card.conn_input_end:
-                    cam_tip = transform_point(card.conn_input_end, M_inv)
+        # --- DEBUG OVERLAY ---
+        if DEBUG_MODE and M_inv is not None:
+            for card in active_cards:
+                # Draw input probe visualization (if it exists)
+                for start_pt, end_pt, is_connected in card.conn_lines:
+                    cam_tip = transform_point(end_pt, M_inv)
                     cv2.circle(frame, cam_tip, 6, (0, 165, 255), -1)
 
                 if card.width > 0:
