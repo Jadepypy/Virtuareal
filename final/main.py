@@ -397,30 +397,29 @@ class KernelAdditionCard(BaseCard):
 
 # --- 4. FACTORY & HELPERS ---
 
+# 1. Define Kernels
+K_BLUR_3 = np.ones((3, 3), np.float32) / 9.0
+K_SOBEL_Y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
+K_SOBEL_X = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+
+# 2. Card Definitions (JSON-like Library)
+CARD_LIBRARY = {
+    10: {"class": ImageCard, "args": [SOURCE_IMG]},
+    20: {"class": KernelCard, "args": [K_BLUR_3]},
+    21: {"class": KernelCard, "args": [K_SOBEL_Y]},
+    22: {"class": KernelCard, "args": [K_SOBEL_X]},
+    23: {"class": KernelAdditionCard, "args": []},
+    30: {"class": KernelAdditionCard, "args": []}
+}
+
+
 def create_physical_card_instance(marker_id):
     """
-    Creates the logic instance. Registration happens in Main.
+    Creates the logic instance using the CARD_LIBRARY look-up.
     """
-    if marker_id == 10:
-        return ImageCard(SOURCE_IMG)
-    elif marker_id == 20:
-        k_size = 3
-        blur_kernel = np.ones((k_size, k_size), np.float32) / (k_size ** 2)
-        return KernelCard(blur_kernel)
-    elif marker_id == 21:
-        # Vertical Gradient (Sobel Y)
-        vertical_grad_kernel = np.array([[-1, -2, -1],
-                                         [0, 0, 0],
-                                         [1, 2, 1]], dtype=np.float32)
-        return KernelCard(vertical_grad_kernel)
-    elif marker_id == 22:
-        # Horizontal Gradient (Sobel X)
-        horizonal_grad_kernel = np.array([[-1, 0, 1],
-                                          [-2, 0, 2],
-                                          [-1, 0, 1]], dtype=np.float32)
-        return KernelCard(horizonal_grad_kernel)
-    elif marker_id == 23 or marker_id == 30:
-        return KernelAdditionCard()
+    config = CARD_LIBRARY.get(marker_id)
+    if config:
+        return config["class"](*config["args"])
     return None
 
 
