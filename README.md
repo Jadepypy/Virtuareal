@@ -14,7 +14,9 @@ Picture Coming Soon!
 
 ## 3.1 Project plan
 
-The BIG IDEA is to visualize the process of  
+The BIG IDEA is to visualize the process of 2D-convolution into an interactive desktop. With simultaneous manipulations users can directly understand how different programs affect pictures and customize their own pipelines to process pictures through convolutions and all kinds of programmable code blocks!
+
+
 
 ## 3.2 Functioning project
 
