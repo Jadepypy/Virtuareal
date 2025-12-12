@@ -2,7 +2,11 @@
 
 # Projector-Camera Card System Documentation
 
-## 1. Code Structure
+# 1 Objective
+
+Virtuareal is an interactive system that allows users to use boards on a table surface to customize picture processing pipelines and observe the process and results simltaneously. Users can edit the pipeline 
+
+## 1.1 Code Structure
 
 ```
 .
