@@ -2,3 +2,5 @@ __pycache__/
 .idea/*
 debug.*
 venv/
+.DS_Store
+
