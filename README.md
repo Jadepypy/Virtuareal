@@ -4,6 +4,7 @@
 
 ## 1. Code Structure
 
+```
 .
 ├── main.py                  # Entry Point & Controller
 │   ├── Init: OpenCV camera, Window, and Aruco Detector.
@@ -23,6 +24,7 @@
 │
 └── cards.json               # (Required External File)
     └── Maps Marker IDs to Card Types and initialization scripts.
+```
 
 
 ## 2. Execution Flow & Architecture
@@ -58,6 +60,7 @@ Example: `{"10": {"init_script": "card = ImageCard(np.zeros((100,100,3)))"}}`
 
 ### System Flowchart
 
+```
 [ Web Camera ]
       |
       v
@@ -86,3 +89,4 @@ Example: `{"10": {"init_script": "card = ImageCard(np.zeros((100,100,3)))"}}`
       |
       v
 [ Projector / Screen ]
+```
