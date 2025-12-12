@@ -4,7 +4,21 @@
 
 # 1 Objective
 
-Virtuareal is an interactive system that allows users to use boards on a table surface to customize picture processing pipelines and observe the process and results simltaneously. Users can edit the pipeline 
+Virtuareal is an interactive system that allows users to use boards on a table surface to customize picture processing pipelines and observe the process and results simltaneously. Users can edit the pipeline by merely moving the boards representing code blocks, and observe real time feedbacks of their manipulations.
+
+# 2 Description
+
+Picture Coming Soon!
+
+# 3 Deliverables
+
+## 3.1 Project plan
+
+The BIG IDEA is to visualize the process of  
+
+## 3.2 Functioning project
+
+## 3.3 Documentation of design process
 
 ## 1.1 Code Structure
 
