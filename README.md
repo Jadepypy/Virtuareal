@@ -16,11 +16,15 @@ Picture Coming Soon!
 
 The BIG IDEA is to visualize the process of 2D-convolution into an interactive desktop. With simultaneous manipulations users can directly understand how different programs affect pictures and customize their own pipelines to process pictures through convolutions and all kinds of programmable code blocks!
 
-
-
 ## 3.2 Functioning project
 
+The functioning device is an interactive desktop that detects the cards on the table, runs corresponding programs and demonstrates the real-time results.
+
+Picture coming soon!
+
 ## 3.3 Documentation of design process
+
+
 
 ## 1.1 Code Structure
 
