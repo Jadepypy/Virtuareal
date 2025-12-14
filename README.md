@@ -24,6 +24,15 @@ Picture coming soon!
 
 ## 3.3 Documentation of design process
 
+## 3.3.1 Function Definition
+
+The system should contain 3 parts: observation, calculation and demonstration. 
+
+The observation part should scan the whole desktop and return a dictionary of card information, which is wrapped up in a self-built Card class, as the keys and the cards' corresponding positions as values.
+
+The calculation part should use the dictionary of card information-position as an input, and process these data in a certain logic to simulate the process of using code block cards to "process" the picture. This part should return the processed pictures to be projected.
+
+The demonstration part should arrange the all the information in a canvas and project the canvas through a projector to the desktop.
 
 
 ## 1.1 Code Structure
