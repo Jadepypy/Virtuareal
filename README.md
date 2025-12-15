@@ -34,6 +34,12 @@ The calculation part should use the dictionary of card information-position as a
 
 The demonstration part should arrange the all the information in a canvas and project the canvas through a projector to the desktop.
 
+## 3.3.2 Roadmap Confirmation
+
+(a) The observation part
+
+    We initially planned to only detect the relative positions to document the 
+
 
 ## 1.1 Code Structure
 
