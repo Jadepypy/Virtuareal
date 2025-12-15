@@ -8,7 +8,7 @@ Virtuareal is an interactive system that allows users to use boards on a table s
 
 # 2 Description
 
-Picture Coming Soon!
+![e833ce5220a802381a1b688425ee8e7c](https://github.com/user-attachments/assets/521248e6-e89c-4912-a959-b248b6c45adc)
 
 # 3 Deliverables
 
@@ -48,7 +48,7 @@ Dec 14: Final demo + Documentation
 
 The functioning device is an interactive desktop that detects the cards on the table, runs corresponding programs and demonstrates the real-time results.
 
-Picture coming soon!
+![4aec6ae93e265b7a93cc17a9c8e999bd](https://github.com/user-attachments/assets/71bea9ad-e560-4932-8324-bd0e673bec9e)
 
 ## 3.3 Documentation of design process
 
