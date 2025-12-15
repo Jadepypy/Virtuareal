@@ -38,7 +38,17 @@ The demonstration part should arrange the all the information in a canvas and pr
 
 (a) The observation part
 
-    We initially planned to only detect the relative positions to document the 
+    We initially planned to only detect the relative positions to document the collaboration relationship between cards. However, it turned out that the there should be 4 anchors to sign the boarder of the desktop and return the absolute positions of cards.
+
+(b) The calculation part
+
+    We initially planned to process the picture with the program blocks at a sequence of from left to right and then return a final result. However, we finally confirmed that, the layout allowing the code vlock cards to look for import with "tentacles" and demonstrating the step result immediately, has a better demonstration effect.
+
+(c) The demonstration part
+
+    We initially planned to read the picture put in a certain area from camera and demonstrate the picture to another certain area. However, since the camera has a rather low resolution, we decided to build the picture in "picture" Cards. Besides, since the layout of calculation cards is decided to be demonstrating results by step, the idea of sector demonstration is eliminated.
+
+In conclusion, the overview of layout of is demonstrated below:
 
 
 ## 1.1 Code Structure
