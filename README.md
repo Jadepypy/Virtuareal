@@ -14,7 +14,35 @@ Picture Coming Soon!
 
 ## 3.1 Project plan
 
+## 3.1.1 BIG IDEA
+
 The BIG IDEA is to visualize the process of 2D-convolution into an interactive desktop. With simultaneous manipulations users can directly understand how different programs affect pictures and customize their own pipelines to process pictures through convolutions and all kinds of programmable code blocks!
+
+## 3.1.2 Timeline
+
+Nov 15: Set up the camera → Raspberry Pi → projector feedback loop
+
+Nov 22: Implement reliable paper card detection and basic filter triggering
+
+Dec 1: Build real-time, stackable filter pipeline and test responsiveness
+
+Dec 5: Refine physical layout and run pilot tests with 1–2 users to assess interaction clarity
+
+Dec 14: Final demo + Documentation
+
+## 3.1.3 Parts Description
+
+- 1x Projector
+  
+- 1x Whiteboard
+  
+- 1x Rhaspberry Pi
+  
+- 1x HDMI wire
+  
+- 10x Card board with QR code
+
+- 10x magnet
 
 ## 3.2 Functioning project
 
