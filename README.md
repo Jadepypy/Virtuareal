@@ -198,3 +198,5 @@ Applying Horizontal and Vertical Grad Separately
 ![blur_kernel](https://github.com/user-attachments/assets/ea52deba-12d8-4df7-85d7-e6408ff19172)
 
 
+## 4. Collaboration
+This project was a highly collaborative effort between Junxiong Chen and Chiahsuan Chang. Chiahsuan proposed the idea of building an application using camera detection and projection. Junxiong introduced the core image convolution concept and developed the card calculation prototype. The final system integration and documentation were completed jointly.
