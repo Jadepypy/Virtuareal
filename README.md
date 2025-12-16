@@ -169,4 +169,4 @@ Example: `{"10": {"init_script": "card = ImageCard(np.zeros((100,100,3)))"}}`
 ```
 
 ## 3. User Interaction
-https://drive.google.com/drive/u/0/folders/1C8naAQ49OaY3A3DRCwqizlIQTf8COqu6
+[Play With Cards](https://drive.google.com/file/d/1MT6r4tiNtQnSdND5HIT2RgMhW1Fx84QT/view?usp=sharing)
