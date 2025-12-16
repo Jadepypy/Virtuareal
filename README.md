@@ -107,33 +107,49 @@ In conclusion, the overview of layout of is demonstrated below:
 ## 2. Execution Flow & Architecture
 
 **Prerequisite:** Create `cards.json` defining marker behaviors.
-Example: `{"10": {"init_script": "card = ImageCard(np.zeros((100,100,3)))"}}`
+*Example:* `{"10": {"init_script": "card = ImageCard(np.zeros((100,100,3)))"}}`
 
 ### Step-by-Step Workflow
 
-1. **Input Acquisition (main.py)**
-   - Captures raw frame from Webcam.
-   - Detects ArUco markers.
-   - **Calibration**: Uses markers defined in `ANCHOR_IDS` (corners) to compute the Homography Matrix (M) mapping Camera Space -> Projector Space.
+#### 1. Input Acquisition (`main.py`)
+* **Hardware Initialization**: Initializes `cv2.VideoCapture(0)` at a resolution of 1280x720 to capture the raw physical workspace.
+* **Marker Detection**: Uses `cv2.aruco.ArucoDetector` configured with `common.ARUCO_DICT_TYPE` to locate the corners of ArUco markers in the frame.
+* **Calibration (The "M" Matrix)**:
+    * **Anchor Logic**: The system filters for specific marker IDs defined in `common.ANCHOR_IDS`. These serve as fixed calibration points (usually the 4 corners of the table). Their positions are averaged over time in `anchor_history` to stabilize signal jitter.
+    * **Homography Calculation**: Uses `common.get_homography_from_history` to compute **`M`**.
+    * **What is M?**: `M` is a **3x3 Homography Matrix**. It mathematically defines the perspective transformation required to map a 2D point from **Camera Space** (the distorted, angled view of the webcam) to **Projector Space** (the flat, rectilinear 1920x1080 coordinate system of the screen).
+    * **Inverse (`M_inv`)**: Computed as `np.linalg.inv(M)`. This allows the system to map virtual boundaries *back* onto the raw camera feed for debugging alignment.
 
-2. **Physical Synchronization (main.py -> card_engine.py)**
-   - Transforms detected marker coordinates using M.
-   - **Register**: Calls `create_physical_card_instance`. If new, Factory spawns object.
-   - **Update**: Updates coordinates in `CardSystem`.
-   - **Decay**: Decrements TTL for unseen cards; unregisters dead cards.
+#### 2. Physical Synchronization (`main.py` -> `card_engine.py`)
+* **Coordinate Transformation**: The system iterates through non-anchor markers. It takes the **bottom-left corner** of the physical marker and applies `common.transform_point(point, M)` to calculate its precise `(cx, cy)` location on the digital canvas.
+* **Registration (Factory Pattern)**:
+    * If a marker ID is detected for the first time, `card_engine.create_physical_card_instance(mid)` is called. This factory function looks up the ID in `cards.json`, executes the `init_script`, and returns a Python object (e.g., `ImageCard`).
+    * The object is registered in `CardSystem` with `is_virtual=False`.
+* **State Update**: Existing cards have their positions updated to the new `(cx, cy)` every frame.
+* **Decay (Persistence)**:
+    * **TTL Hysteresis**: To prevent cards from "flickering" due to temporary occlusion (e.g., a hand passing over a marker), the system uses a Time-To-Live (TTL) counter.
+    * **Garbage Collection**: `decrease_ttl(card)` is called on unseen cards. Only when TTL reaches 0 are they permanently removed via `unregister`.
 
-3. **Simulation Loop (main.py -> card_engine.py)**
-   - Runs for `MAX_CHAIN_DEPTH` iterations to propagate logic chains.
-   - **Resolve**: Each card probes `LEFT`/`RIGHT` for neighbors (spatial hit-testing).
-   - **Execute**: Runs injected `run_logic()` (from `common.py` scripts).
-   - **Spawn**: If logic generates output (e.g., Filter result), a Virtual Card is registered `DOWN` relative to parent.
+#### 3. Simulation Loop (`main.py` -> `card_engine.py`)
+* **Context Isolation**: The system temporarily swaps the global drawing surface to a `dummy_canvas` (an empty array). This separates **Logic** from **Rendering**, ensuring that calculations (which may spawn new virtual cards) occur before the final frame is drawn.
+* **Propagation Chain**:
+    * The loop runs `MAX_CHAIN_DEPTH` times to resolve multi-hop dependencies (e.g., Card A feeds Card B, which feeds Card C).
+    * **Resolve**: Each card queries the `CardSystem` to find neighbors (e.g., "Is there a card to my LEFT?") using spatial hit-testing.
+    * **Execute**: The system runs the injected `run_logic()` scripts (loaded from `common.py`).
+    * **Spawn**: If logic generates an output (e.g., a "Filter" card producing a filtered image), a **Virtual Card** is spawned and immediately added to `active_cards` for processing in the same frame.
 
-4. **Rendering (card_engine.py)**
-   - Draws visual content (images/matrices) onto the global `projector_canvas`.
-   - Draws connection lines (green/red) between dependent cards.
+#### 4. Rendering (`card_engine.py`)
+* **Canvas Switch**: `CardSystem.canvas` is switched back to the actual `projector_canvas`.
+* **Final Pass**: The system iterates through all active cards one last time to generate the visual output.
+* **Draw**:
+    * Visual content (images, matrices, text) is blitted onto the canvas.
+    * **Connection Lines**: Green (valid connection) or Red (invalid connection) lines are drawn between dependent cards to visualize the logic flow.
 
-5. **Output (main.py)**
-   - `cv2.imshow` displays the final `projector_canvas` full screen.
+#### 5. Output (`main.py`)
+* **Fullscreen Display**: `cv2.imshow` displays the final `projector_canvas`. The window is forced to fullscreen using `cv2.WINDOW_FULLSCREEN`.
+* **Debug Overlay**:
+    * If `DEBUG_MODE` is on, the system uses `M_inv` to project the digital boundaries of cards back onto the raw webcam feed (`cv2.perspectiveTransform`).
+    * This verifies that the digital projection aligns perfectly with the physical paper cards.
 
 ### System Flowchart
 
