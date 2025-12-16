@@ -31,6 +31,7 @@ Dec 5: Refine physical layout and run pilot tests with 1–2 users to assess int
 Dec 14: Final demo + Documentation
 
 ## 3.1.3 Parts Description
+![setup](https://github.com/user-attachments/assets/bdb72b38-7fcf-469e-ab51-342bb1bbf4c6)
 
 - 1x Projector
   
@@ -186,3 +187,14 @@ In conclusion, the overview of layout of is demonstrated below:
 
 ## 3. User Interaction
 [Play With Cards](https://drive.google.com/file/d/1MT6r4tiNtQnSdND5HIT2RgMhW1Fx84QT/view?usp=sharing)
+
+#### Kernel Addition
+![kernel_addition](https://github.com/user-attachments/assets/5380c199-ba7f-415a-a7a9-48a701e31323)
+![kernel_addition_demo](https://github.com/user-attachments/assets/be5b1f4f-d4f4-4f55-b5c4-ded8aa58dc14)
+Applying Horizontal and Vertical Grad Separately
+![horizontal_and_vertical](https://github.com/user-attachments/assets/0c4227f6-e87e-40b2-89c5-bb07a696a46f)
+
+#### Blur Kernel
+![blur_kernel](https://github.com/user-attachments/assets/ea52deba-12d8-4df7-85d7-e6408ff19172)
+
+
